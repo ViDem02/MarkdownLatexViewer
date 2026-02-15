@@ -23,6 +23,9 @@ HTML = r"""
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Markdown + LaTeX Viewer</title>
   
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23667eea'/><text x='50' y='68' font-size='60' text-anchor='middle' fill='white'>📝</text></svg>">
+  
   <!-- CodeMirror -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
   

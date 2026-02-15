@@ -1,0 +1,688 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Markdown + LaTeX Viewer</title>
+  
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23667eea'/><text x='50' y='68' font-size='60' text-anchor='middle' fill='white'>📝</text></svg>">
+  
+  <!-- CodeMirror -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+  
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  
+  <style>
+    * { box-sizing: border-box; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      margin: 0; 
+      padding: 0;
+      overflow: hidden;
+    }
+    
+    header { 
+      padding: 12px 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    header h1 { 
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+    
+    .toolbar { 
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+    }
+    
+    button {
+      padding: 8px 16px;
+      background: rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.3);
+      color: white;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    
+    button:hover {
+      background: rgba(255,255,255,0.3);
+      transform: translateY(-1px);
+    }
+    
+    #container {
+      display: flex;
+      height: calc(100vh - 56px);
+    }
+    
+    #editor-pane {
+      width: 50%;
+      border-right: 2px solid #ddd;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    #viewer-pane {
+      width: 50%;
+      overflow-y: auto;
+      padding: 20px 40px;
+      background: #fafafa;
+      position: relative;
+    }
+    
+    .CodeMirror {
+      height: 100%;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    
+    /* Rendered content styling */
+    #rendered-content {
+      max-width: 900px;
+      background: white;
+      padding: 40px;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      line-height: 1.8;
+    }
+    
+    #rendered-content h1, 
+    #rendered-content h2, 
+    #rendered-content h3 {
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+      color: #333;
+    }
+    
+    #rendered-content code {
+      background: #f5f5f5;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 0.9em;
+    }
+    
+    #rendered-content pre {
+      background: #f5f5f5;
+      padding: 16px;
+      border-radius: 6px;
+      overflow-x: auto;
+      border-left: 4px solid #667eea;
+    }
+    
+    /* KaTeX rendered segments */
+    .katex-display {
+      margin: 1em 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+    
+    /* Manual KaTeX renders have hover effect */
+    .manual-katex-render {
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .manual-katex-render:hover {
+      background: rgba(102, 126, 234, 0.15) !important;
+      box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+    }
+    
+    /* Selection context menu */
+    #context-menu {
+      position: fixed;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      padding: 4px;
+      z-index: 10000;
+      display: none;
+      min-width: 150px;
+    }
+    
+    #context-menu button {
+      display: block;
+      width: 100%;
+      padding: 8px 16px;
+      background: white;
+      color: #333;
+      border: none;
+      border-radius: 4px;
+      text-align: left;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s;
+      white-space: nowrap;
+      margin: 2px 0;
+    }
+    
+    #context-menu button:first-child {
+      margin-top: 0;
+    }
+    
+    #context-menu button:last-child {
+      margin-bottom: 0;
+    }
+    
+    #context-menu button:hover {
+      background: #667eea;
+      color: white;
+      transform: none;
+    }
+    
+    ::selection {
+      background: rgba(102, 126, 234, 0.3);
+    }
+    
+    .status-bar {
+      position: fixed;
+      bottom: 12px;
+      right: 12px;
+      padding: 8px 16px;
+      background: rgba(0,0,0,0.8);
+      color: white;
+      font-size: 12px;
+      border-radius: 6px;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    
+    .status-bar.show {
+      opacity: 1;
+    }
+    
+    /* Resizer */
+    #resizer {
+      width: 4px;
+      background: #ddd;
+      cursor: col-resize;
+      position: relative;
+      z-index: 10;
+    }
+    
+    #resizer:hover {
+      background: #667eea;
+    }
+    
+    /* Hidden file input */
+    #file-input {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📝 Markdown + LaTeX Viewer</h1>
+    <div class="toolbar">
+      <button id="import">Import</button>
+      <button id="export">Export</button>
+      <button id="refresh">Refresh</button>
+      <button id="clear">Clear</button>
+    </div>
+  </header>
+  
+  <div id="container">
+    <div id="editor-pane">
+      <textarea id="code"></textarea>
+    </div>
+    <div id="resizer"></div>
+    <div id="viewer-pane">
+      <div id="rendered-content"></div>
+    </div>
+  </div>
+  
+  <div id="context-menu">
+    <button id="render-katex">✨ Render as KaTeX</button>
+    <button id="remove-katex">🗑️ Remove KaTeX rendering</button>
+  </div>
+  
+  <div id="status-bar" class="status-bar"></div>
+  
+  <input type="file" id="file-input" accept=".md,.txt">
+  
+  <!-- Libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/markdown/markdown.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+  
+  <script>
+    // LocalStorage key
+    const STORAGE_KEY = 'markdown-latex-viewer-content';
+    
+    // Initialize CodeMirror
+    const textarea = document.getElementById('code');
+    const editor = CodeMirror.fromTextArea(textarea, {
+      mode: 'markdown',
+      lineNumbers: true,
+      lineWrapping: true,
+      theme: 'default',
+      indentUnit: 2,
+      tabSize: 2,
+      extraKeys: {
+        'Cmd-S': () => saveToLocalStorage(),
+        'Ctrl-S': () => saveToLocalStorage(),
+        Tab: function(cm) {
+          if (cm.somethingSelected()) cm.indentSelection("add");
+          else cm.replaceSelection("  ");
+        }
+      }
+    });
+    
+    // Configure marked to not escape backslashes in math
+    marked.setOptions({
+      breaks: false,
+      gfm: true,
+      pedantic: false
+    });
+    
+    // Render content with standard markdown + KaTeX
+    function renderContent() {
+      const content = editor.getValue();
+      const renderedDiv = document.getElementById('rendered-content');
+      
+      // Pre-process: protect LaTeX delimiters from markdown parser
+      let processedContent = content;
+      
+      // Temporarily replace LaTeX blocks to protect them
+      const mathBlocks = [];
+      let mathIndex = 0;
+      
+      // Protect display math \[...\]
+      processedContent = processedContent.replace(/\\\[([\s\S]*?)\\\]/g, (match, latex) => {
+        const placeholder = `MATHBLOCK${mathIndex}DISPLAY`;
+        mathBlocks[mathIndex] = { type: 'display', latex: latex, placeholder };
+        mathIndex++;
+        return placeholder;
+      });
+      
+      // Protect display math $$...$$
+      processedContent = processedContent.replace(/\$\$([\s\S]*?)\$\$/g, (match, latex) => {
+        const placeholder = `MATHBLOCK${mathIndex}DISPLAY`;
+        mathBlocks[mathIndex] = { type: 'display', latex: latex, placeholder };
+        mathIndex++;
+        return placeholder;
+      });
+      
+      // Protect inline math \(...\)
+      processedContent = processedContent.replace(/\\\(([\s\S]*?)\\\)/g, (match, latex) => {
+        const placeholder = `MATHBLOCK${mathIndex}INLINE`;
+        mathBlocks[mathIndex] = { type: 'inline', latex: latex, placeholder };
+        mathIndex++;
+        return placeholder;
+      });
+      
+      // Protect inline math $...$
+      processedContent = processedContent.replace(/\$([^\$\n]+?)\$/g, (match, latex) => {
+        const placeholder = `MATHBLOCK${mathIndex}INLINE`;
+        mathBlocks[mathIndex] = { type: 'inline', latex: latex, placeholder };
+        mathIndex++;
+        return placeholder;
+      });
+      
+      // Convert markdown to HTML
+      let htmlContent = marked.parse(processedContent);
+      
+      // Restore and render LaTeX blocks
+      mathBlocks.forEach((block, index) => {
+        if (block) {
+          try {
+            const rendered = katex.renderToString(block.latex, {
+              displayMode: block.type === 'display',
+              throwOnError: false,
+              errorColor: '#cc0000',
+              strict: false,
+              trust: false,
+              macros: {
+                "\\RR": "\\mathbb{R}",
+                "\\NN": "\\mathbb{N}",
+                "\\ZZ": "\\mathbb{Z}",
+                "\\QQ": "\\mathbb{Q}",
+              }
+            });
+            htmlContent = htmlContent.replace(block.placeholder, rendered);
+          } catch (e) {
+            console.error('KaTeX error:', e);
+            htmlContent = htmlContent.replace(block.placeholder, block.latex);
+          }
+        }
+      });
+      
+      renderedDiv.innerHTML = htmlContent;
+      showStatus('Content rendered');
+    }
+    
+    // Context menu for selection
+    const contextMenu = document.getElementById('context-menu');
+    const renderButton = document.getElementById('render-katex');
+    const removeButton = document.getElementById('remove-katex');
+    const viewerPane = document.getElementById('viewer-pane');
+    const renderedContent = document.getElementById('rendered-content');
+    let selectedText = '';
+    let selectionRange = null;
+    let selectedElement = null;
+    
+    // Ensure both buttons are visible by default
+    renderButton.style.display = 'block';
+    removeButton.style.display = 'block';
+    
+    // Show context menu on text selection in viewer
+    document.addEventListener('mouseup', (e) => {
+      // Only handle selections within the viewer pane
+      if (!viewerPane.contains(e.target)) {
+        return;
+      }
+      
+      const selection = window.getSelection();
+      selectedText = selection.toString().trim();
+      
+      if (selectedText.length > 0) {
+        selectionRange = selection.getRangeAt(0);
+        selectedElement = selection.anchorNode.parentElement;
+        
+        // Always show both buttons
+        renderButton.style.display = 'block';
+        removeButton.style.display = 'block';
+        
+        // Position context menu near cursor
+        const x = e.clientX;
+        const y = e.clientY + 10;
+        contextMenu.style.left = `${x}px`;
+        contextMenu.style.top = `${y}px`;
+        contextMenu.style.display = 'block';
+        
+        // Prevent default context menu
+        e.preventDefault();
+      } else {
+        contextMenu.style.display = 'none';
+      }
+    });
+    
+    // Hide context menu on click outside
+    document.addEventListener('mousedown', (e) => {
+      if (!contextMenu.contains(e.target)) {
+        contextMenu.style.display = 'none';
+      }
+    });
+    
+    // Render selected text as KaTeX
+    document.getElementById('render-katex').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!selectedText || !selectionRange) return;
+      
+      try {
+        // Create a span to hold the rendered KaTeX
+        const katexSpan = document.createElement('span');
+        katexSpan.style.display = 'inline-block';
+        katexSpan.style.padding = '2px 4px';
+        katexSpan.style.margin = '0 2px';
+        katexSpan.style.background = 'rgba(102, 126, 234, 0.05)';
+        katexSpan.style.borderRadius = '3px';
+        katexSpan.setAttribute('data-original-latex', selectedText);
+        katexSpan.classList.add('manual-katex-render');
+        
+        // Try to render as KaTeX
+        katex.render(selectedText, katexSpan, {
+          displayMode: false,
+          throwOnError: true,
+          errorColor: '#cc0000',
+          strict: false,
+          trust: false,
+        });
+        
+        // Replace the selection with rendered KaTeX
+        selectionRange.deleteContents();
+        selectionRange.insertNode(katexSpan);
+        
+        showStatus('✓ Rendered as KaTeX', 2000);
+      } catch (e) {
+        // If it fails, try display mode
+        try {
+          const katexDiv = document.createElement('div');
+          katexDiv.style.margin = '1em 0';
+          katexDiv.style.padding = '8px';
+          katexDiv.style.background = 'rgba(102, 126, 234, 0.05)';
+          katexDiv.style.borderRadius = '6px';
+          katexDiv.setAttribute('data-original-latex', selectedText);
+          katexDiv.classList.add('manual-katex-render');
+          
+          katex.render(selectedText, katexDiv, {
+            displayMode: true,
+            throwOnError: true,
+            errorColor: '#cc0000',
+            strict: false,
+            trust: false,
+          });
+          
+          selectionRange.deleteContents();
+          selectionRange.insertNode(katexDiv);
+          
+          showStatus('✓ Rendered as KaTeX (display mode)', 2000);
+        } catch (e) {
+          console.error('KaTeX rendering error:', e);
+          showStatus('✗ Invalid LaTeX syntax', 3000);
+        }
+      }
+      
+      contextMenu.style.display = 'none';
+      window.getSelection().removeAllRanges();
+    });
+    
+    // Remove KaTeX rendering from selected element
+    document.getElementById('remove-katex').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!selectedElement) return;
+      
+      try {
+        // Find the manual KaTeX container element
+        let katexContainer = selectedElement.closest('.manual-katex-render');
+        
+        if (!katexContainer) {
+          // Check if the selected element is the container
+          if (selectedElement.classList?.contains('manual-katex-render')) {
+            katexContainer = selectedElement;
+          } else {
+            // Look for any wrapper with the background style
+            katexContainer = selectedElement.closest('span[style*="rgba(102, 126, 234"]') ||
+                           selectedElement.closest('div[style*="rgba(102, 126, 234"]');
+          }
+        }
+        
+        if (katexContainer && katexContainer.parentNode) {
+          // Get the original LaTeX or text content
+          const originalLatex = katexContainer.getAttribute('data-original-latex');
+          const textContent = originalLatex || katexContainer.textContent || selectedText;
+          const textNode = document.createTextNode(textContent);
+          katexContainer.parentNode.replaceChild(textNode, katexContainer);
+          showStatus('✓ KaTeX rendering removed', 2000);
+        } else {
+          showStatus('✗ No manually rendered KaTeX found', 2000);
+        }
+      } catch (e) {
+        console.error('Error removing KaTeX:', e);
+        showStatus('✗ Error removing rendering', 3000);
+      }
+      
+      contextMenu.style.display = 'none';
+      window.getSelection().removeAllRanges();
+    });
+    
+    // Auto-refresh on edit (debounced)
+    let refreshTimeout;
+    editor.on('change', () => {
+      clearTimeout(refreshTimeout);
+      refreshTimeout = setTimeout(() => {
+        renderContent();
+        saveToLocalStorage();
+      }, 500);
+    });
+    
+    // Save to localStorage
+    function saveToLocalStorage() {
+      const content = editor.getValue();
+      try {
+        localStorage.setItem(STORAGE_KEY, content);
+        showStatus('✓ Auto-saved', 2000);
+      } catch (e) {
+        console.error('Save error:', e);
+        showStatus('✗ Save error', 3000);
+      }
+    }
+    
+    // Load from localStorage
+    function loadFromLocalStorage() {
+      try {
+        const content = localStorage.getItem(STORAGE_KEY);
+        if (content) {
+          editor.setValue(content);
+          renderContent();
+        } else {
+          // Default content
+          const defaultContent = `# Welcome to Markdown + LaTeX Viewer
+
+## Features
+
+- **Live preview** with split-pane editor
+- **LaTeX support** using KaTeX: $E = mc^2$
+- **Display math**: 
+
+$$\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}$$
+
+- **Manual rendering**: Select text in preview → click "Render as KaTeX"
+- **Auto-save**: Content persists in browser storage
+
+## Try it out!
+
+Edit this text and see the changes in real-time.
+
+Select any text in the preview pane and render it as LaTeX!`;
+          editor.setValue(defaultContent);
+          renderContent();
+        }
+      } catch (e) {
+        console.error('Load error:', e);
+      }
+    }
+    
+    // Import file
+    const fileInput = document.getElementById('file-input');
+    document.getElementById('import').addEventListener('click', () => {
+      fileInput.click();
+    });
+    
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        editor.setValue(event.target.result);
+        renderContent();
+        saveToLocalStorage();
+        showStatus('✓ File imported', 2000);
+      };
+      reader.onerror = () => {
+        showStatus('✗ Import failed', 3000);
+      };
+      reader.readAsText(file);
+      
+      // Reset file input
+      fileInput.value = '';
+    });
+    
+    // Export file
+    document.getElementById('export').addEventListener('click', () => {
+      const content = editor.getValue();
+      const blob = new Blob([content], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'document.md';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showStatus('✓ File exported', 2000);
+    });
+    
+    // Clear content
+    document.getElementById('clear').addEventListener('click', () => {
+      if (confirm('Clear all content? This cannot be undone.')) {
+        editor.setValue('');
+        renderContent();
+        localStorage.removeItem(STORAGE_KEY);
+        showStatus('✓ Content cleared', 2000);
+      }
+    });
+    
+    // Show status message
+    function showStatus(message, duration = 2000) {
+      const statusBar = document.getElementById('status-bar');
+      statusBar.textContent = message;
+      statusBar.classList.add('show');
+      setTimeout(() => {
+        statusBar.classList.remove('show');
+      }, duration);
+    }
+    
+    // Event listeners
+    document.getElementById('refresh').addEventListener('click', renderContent);
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        saveToLocalStorage();
+      }
+    });
+    
+    // Resizer functionality
+    const resizer = document.getElementById('resizer');
+    const editorPane = document.getElementById('editor-pane');
+    const container = document.getElementById('container');
+    
+    let isResizing = false;
+    
+    resizer.addEventListener('mousedown', (e) => {
+      isResizing = true;
+      document.body.style.cursor = 'col-resize';
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing) return;
+      
+      const containerRect = container.getBoundingClientRect();
+      const newWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100;
+      
+      if (newWidth > 20 && newWidth < 80) {
+        editorPane.style.width = `${newWidth}%`;
+        document.getElementById('viewer-pane').style.width = `${100 - newWidth}%`;
+      }
+    });
+    
+    document.addEventListener('mouseup', () => {
+      if (isResizing) {
+        isResizing = false;
+        document.body.style.cursor = 'default';
+      }
+    });
+    
+    // Initialize
+    loadFromLocalStorage();
+  </script>
+</body>
+</html>
