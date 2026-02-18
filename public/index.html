@@ -12,6 +12,7 @@
 
   <!-- CodeMirror -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/dialog/dialog.min.css">
 
   <!-- KaTeX -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
@@ -318,6 +319,7 @@
       <button id="import">Import</button>
       <button id="export">Export</button>
       <button id="refresh">Refresh</button>
+      <button id="search">Search in editor</button>
       <button id="clear">Clear</button>
     </div>
   </header>
@@ -357,6 +359,10 @@
   <!-- Libraries -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/markdown/markdown.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/dialog/dialog.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/searchcursor.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/search.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/jump-to-line.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
@@ -799,6 +805,9 @@ Select any text in the preview pane and render it as LaTeX!`;
 
     // Event listeners
     document.getElementById('refresh').addEventListener('click', renderContent);
+    document.getElementById('search').addEventListener('click', () => {
+      editor.execCommand('find');
+    });
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
