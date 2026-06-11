@@ -8,6 +8,7 @@ A split-pane markdown editor with live preview and KaTeX rendering.
 
 - Live markdown preview
 - LaTeX math rendering ($...$, $$...$$, \(...\), \[...\])
+- Mermaid diagram rendering (```mermaid code fences)
 - Manual KaTeX rendering (select text → right-click)
 - Auto-save to browser storage
 - Import/Export markdown files

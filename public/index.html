@@ -51,6 +51,12 @@
       gap: 8px;
     }
 
+    .toolbar button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
     button {
       padding: 8px 16px;
       background: rgba(255, 255, 255, 0.2);
@@ -124,6 +130,35 @@
       border-radius: 6px;
       overflow-x: auto;
       border-left: 4px solid #667eea;
+    }
+
+    /* Tables: always 0.5px solid black borders */
+    #rendered-content table {
+      border-collapse: collapse;
+      border: 0.5px solid #000;
+      width: 100%;
+      max-width: calc(100% - 1px);
+      box-sizing: border-box;
+      table-layout: fixed;
+    }
+
+    #rendered-content th,
+    #rendered-content td {
+      border: 0.5px solid #000;
+      padding: 8px 10px;
+      text-align: left;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: normal;
+    }
+
+    .mermaid-diagram {
+      margin: 1.2em 0;
+      padding: 12px;
+      background: #fbfbff;
+      border: 1px solid #e6e9ff;
+      border-radius: 8px;
+      overflow-x: auto;
     }
 
     /* KaTeX rendered segments */
@@ -318,6 +353,7 @@
     <div class="toolbar">
       <button id="import">Import</button>
       <button id="export">Export</button>
+      <button id="export-pdf">Export PDF</button>
       <button id="refresh">Refresh</button>
       <button id="search">Search in editor</button>
       <button id="clear">Clear</button>
@@ -359,6 +395,7 @@
   <!-- Libraries -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/markdown/markdown.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/edit/closebrackets.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/dialog/dialog.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/searchcursor.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/search.min.js"></script>
@@ -366,10 +403,36 @@
   <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 
   <script>
     // LocalStorage key
     const STORAGE_KEY = 'markdown-latex-viewer-content';
+
+    function insertDollarPair(cm) {
+      const selections = cm.listSelections();
+      const allEmpty = selections.every(selection => selection.empty());
+
+      if (!allEmpty) {
+        cm.replaceSelections(cm.getSelections().map(text => `$${text}$`), 'around');
+        return;
+      }
+
+      cm.operation(() => {
+        for (let i = selections.length - 1; i >= 0; i--) {
+          const cursor = selections[i].head;
+          const nextPos = { line: cursor.line, ch: cursor.ch + 1 };
+          const nextChar = cm.getRange(cursor, nextPos);
+
+          if (nextChar === '$') {
+            cm.setCursor(nextPos);
+          } else {
+            cm.replaceRange('$$', cursor);
+            cm.setCursor({ line: cursor.line, ch: cursor.ch + 1 });
+          }
+        }
+      });
+    }
 
     // Initialize CodeMirror
     const textarea = document.getElementById('code');
@@ -378,15 +441,26 @@
       lineNumbers: true,
       lineWrapping: true,
       theme: 'default',
+      autoCloseBrackets: {
+        pairs: "()[]{}\"\"''``$$"
+      },
       indentUnit: 2,
       tabSize: 2,
       extraKeys: {
         'Cmd-S': () => saveToLocalStorage(),
         'Ctrl-S': () => saveToLocalStorage(),
+        '$': (cm) => insertDollarPair(cm),
         Tab: function (cm) {
           if (cm.somethingSelected()) cm.indentSelection("add");
           else cm.replaceSelection("  ");
         }
+      }
+    });
+
+    editor.getWrapperElement().addEventListener('keydown', (e) => {
+      if (e.key === '$' && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        insertDollarPair(editor);
       }
     });
 
@@ -397,13 +471,311 @@
       pedantic: false
     });
 
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict'
+    });
+
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    async function renderMermaidDiagrams(container) {
+      const mermaidNodes = container.querySelectorAll('.mermaid');
+      if (!mermaidNodes.length) {
+        return;
+      }
+
+      try {
+        await mermaid.run({ nodes: mermaidNodes });
+      } catch (e) {
+        console.error('Mermaid rendering error:', e);
+        showStatus('⚠ Mermaid rendering error', 3000);
+      }
+    }
+
+    async function exportPdf() {
+      await renderContent();
+
+      const printableHtml = renderedContent.innerHTML;
+      const safeContent = JSON.stringify(printableHtml).replace(/<\/script/gi, '<\\/script');
+      const timestamp = new Date().toLocaleString();
+
+      const printDocument = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Print Preview</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"><\/script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: #eef1f6;
+        color: #1a1f2c;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      }
+
+      .print-toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        background: #ffffff;
+        border-bottom: 1px solid #d9deea;
+      }
+
+      .print-toolbar button {
+        border: 0;
+        border-radius: 8px;
+        background: #667eea;
+        color: #fff;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .page {
+        width: min(210mm, 100%);
+        margin: 18px auto;
+        background: #fff;
+        padding: 18mm 16mm;
+        box-shadow: 0 6px 24px rgba(20, 27, 45, 0.08);
+        line-height: 1.7;
+      }
+
+      .page img {
+        max-width: 100%;
+      }
+
+      .mermaid-diagram {
+        margin: 1.2em 0;
+        padding: 12px;
+        background: #fbfbff;
+        border: 1px solid #e6e9ff;
+        border-radius: 8px;
+        overflow-x: auto;
+      }
+
+      .mermaid {
+        display: flex;
+        justify-content: center;
+      }
+
+      .mermaid svg {
+        max-width: 100%;
+        height: auto;
+      }
+
+      .katex-display {
+        overflow-x: auto;
+        overflow-y: hidden;
+      }
+
+      /* Tables in print preview: match preview borders */
+      .page table {
+        border-collapse: collapse;
+        border: 0.5px solid #000;
+        width: 100%;
+        max-width: calc(100% - 1px);
+        box-sizing: border-box;
+        table-layout: fixed;
+      }
+
+      .page th,
+      .page td {
+        border: 0.5px solid #000;
+        padding: 8px 10px;
+        text-align: left;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      h1, h2, h3, h4, h5, h6,
+      p, li, blockquote, pre, table, figure {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+
+      p, li {
+        orphans: 3;
+        widows: 3;
+      }
+
+      @media print {
+        @page {
+          size: A4;
+          margin: 12mm;
+        }
+
+        body {
+          background: #fff;
+        }
+
+        .print-toolbar {
+          display: none;
+        }
+
+        .page {
+          width: auto;
+          margin: 0;
+          padding: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="print-toolbar">
+      <div>Print Preview - ${timestamp}</div>
+      <button onclick="window.print()">Print / Save as PDF</button>
+    </div>
+    <main class="page" id="print-content"></main>
+    <script>
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict'
+      });
+
+      const html = ${safeContent};
+      document.getElementById('print-content').innerHTML = html;
+
+      window.addEventListener('load', async () => {
+        try {
+          // Wait until mermaid library is available (robust against slow loads)
+          await new Promise((resolve) => {
+            const check = () => {
+              if (window.mermaid && (typeof window.mermaid.run === 'function' || typeof window.mermaid.init === 'function')) {
+                resolve();
+              } else {
+                setTimeout(check, 50);
+              }
+            };
+            check();
+          });
+
+          const mermaidNodes = document.querySelectorAll('.mermaid');
+          if (mermaidNodes.length) {
+            // Prefer programmatic render to get full SVG output per-diagram
+            function escapeHtmlPrint(s) {
+              return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+            for (const node of mermaidNodes) {
+              try {
+                // Prefer the original encoded diagram source if available
+                let diagramText = '';
+                const encoded = node.getAttribute && node.getAttribute('data-diagram');
+                if (encoded) {
+                  try { diagramText = decodeURIComponent(encoded); } catch (e) { diagramText = node.textContent || ''; }
+                } else {
+                  diagramText = node.textContent || '';
+                }
+
+                // Clear node to avoid passing existing SVG/CSS back into the renderer
+                node.innerHTML = '';
+
+                // Try mermaid.render or mermaid.mermaidAPI.render
+                let svgCode = null;
+
+                if (typeof window.mermaid.render === 'function') {
+                  // mermaid.render may be synchronous or return a promise
+                  try {
+                    const res = window.mermaid.render('mermaid-' + Date.now() + Math.floor(Math.random() * 1000), diagramText);
+                    // render can return svg string or an object with svg
+                    svgCode = (typeof res === 'string') ? res : (res && res.svg) ? res.svg : null;
+                  } catch (e) {
+                    // Some versions use a callback form via mermaid.mermaidAPI
+                  }
+                }
+
+                if (!svgCode && window.mermaid.mermaidAPI && typeof window.mermaid.mermaidAPI.render === 'function') {
+                  // Wrap callback-style API in a promise
+                  svgCode = await new Promise((resolve, reject) => {
+                    try {
+                      window.mermaid.mermaidAPI.render('mermaid-' + Date.now() + Math.floor(Math.random() * 1000), diagramText, (svg) => resolve(svg));
+                    } catch (err) {
+                      reject(err);
+                    }
+                  });
+                }
+
+                if (svgCode) {
+                  // Detect mermaid-generated error SVGs and fallback to source
+                  if (/Syntax error in text|mermaid version/i.test(svgCode)) {
+                    node.innerHTML = '<pre class="mermaid-fallback">' + escapeHtmlPrint(diagramText) + '</pre>';
+                  } else {
+                    node.innerHTML = svgCode;
+                  }
+                } else {
+                  // Fallback to run/init for older versions
+                  if (typeof window.mermaid.run === 'function') {
+                    await window.mermaid.run({ nodes: [node] });
+                  } else if (typeof window.mermaid.init === 'function') {
+                    window.mermaid.init(undefined, [node]);
+                  }
+                }
+              } catch (err) {
+                console.error('Per-diagram Mermaid render failed:', err);
+                // attempt best-effort run
+                try {
+                  if (typeof window.mermaid.run === 'function') await window.mermaid.run({ nodes: [node] });
+                } catch (e) { /* ignore */ }
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Mermaid print rendering error:', error);
+        }
+      });
+    <\/script>
+  </body>
+</html>`;
+
+      const blob = new Blob([printDocument], { type: 'text/html' });
+      const blobUrl = URL.createObjectURL(blob);
+      const printWindow = window.open(blobUrl, '_blank');
+
+      if (!printWindow) {
+        URL.revokeObjectURL(blobUrl);
+        showStatus('Popup blocked. Allow popups to open print preview.', 3000);
+        return;
+      }
+
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      showStatus('Print preview opened in a new tab');
+    }
+
     // Render content with standard markdown + KaTeX
-    function renderContent() {
+    async function renderContent() {
       const content = editor.getValue();
       const renderedDiv = document.getElementById('rendered-content');
 
       // Pre-process: protect LaTeX delimiters from markdown parser
       let processedContent = content;
+
+      // Protect mermaid code blocks before any math parsing.
+      const mermaidBlocks = [];
+      let mermaidIndex = 0;
+
+      processedContent = processedContent.replace(/```mermaid\s*\n([\s\S]*?)```/g, (match, diagram) => {
+        const placeholder = `MERMAIDBLOCK${mermaidIndex}`;
+        mermaidBlocks[mermaidIndex] = { placeholder, diagram: diagram.trim() };
+        mermaidIndex++;
+        return placeholder;
+      });
 
       // Temporarily replace LaTeX blocks to protect them
       const mathBlocks = [];
@@ -469,7 +841,19 @@
         }
       });
 
+      // Restore Mermaid blocks after markdown and math rendering.
+      mermaidBlocks.forEach((block) => {
+        if (block) {
+          // Store the raw diagram source in a data attribute (URI-encoded)
+          const mermaidHtml = `<div class="mermaid-diagram"><div class="mermaid" data-diagram="${encodeURIComponent(block.diagram)}">${escapeHtml(block.diagram)}</div></div>`;
+          htmlContent = htmlContent.replace(block.placeholder, mermaidHtml);
+        }
+      });
+
       renderedDiv.innerHTML = htmlContent;
+
+      // Wait for mermaid diagrams to render before proceeding
+      await renderMermaidDiagrams(renderedDiv);
 
       // Post-process: Add IDs to headings and generate ToC
       generateToC(renderedDiv);
@@ -724,6 +1108,19 @@
 - **LaTeX support** using KaTeX: $E = mc^2$
 - **Display math**: 
 
+## Mermaid support
+
+      \`\`\`mermaid
+graph TD
+  A[Write Markdown] --> B{Render Preview}
+  B --> C[KaTeX]
+  B --> D[Mermaid]
+      \`\`\`
+
+## Display math
+
+**Display math**:
+
 $$\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}$$
 
 - **Manual rendering**: Select text in preview → click "Render as KaTeX"
@@ -805,6 +1202,7 @@ Select any text in the preview pane and render it as LaTeX!`;
 
     // Event listeners
     document.getElementById('refresh').addEventListener('click', renderContent);
+    document.getElementById('export-pdf').addEventListener('click', exportPdf);
     document.getElementById('search').addEventListener('click', () => {
       editor.execCommand('find');
     });
