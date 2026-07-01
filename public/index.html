@@ -26,6 +26,9 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
       margin: 0;
       padding: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
       overflow: hidden;
     }
 
@@ -37,6 +40,7 @@
       gap: 12px;
       align-items: center;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      flex: 0 0 auto;
     }
 
     header h1 {
@@ -57,6 +61,61 @@
       transform: none;
     }
 
+    .mini-mode header {
+      height: 60px;
+      padding: 8px 16px;
+    }
+
+    .mini-mode header h1 {
+      font-size: 17px;
+    }
+
+    .mini-mode header .toolbar {
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .mini-mode header .toolbar button {
+      padding: 4px 10px;
+      font-size: 12px;
+      border-radius: 5px;
+    }
+
+    .mini-mode .tab-bar {
+      display: none;
+    }
+
+    .mini-mode #container {
+      flex-direction: column;
+    }
+
+    .mini-mode #editor-pane,
+    .mini-mode #viewer-pane {
+      width: 100%;
+      min-height: 0;
+      overflow: auto;
+      border-right: none;
+    }
+
+    .mini-mode #viewer-pane {
+      padding: 8px 10px;
+    }
+
+    .mini-mode #editor-pane {
+      border-bottom: 2px solid #ddd;
+    }
+
+    .mini-mode #rendered-content {
+      padding: 16px;
+    }
+
+    .mini-mode #resizer {
+      width: 100%;
+      height: 4px;
+      cursor: row-resize;
+    }
+
     button {
       padding: 8px 16px;
       background: rgba(255, 255, 255, 0.2);
@@ -75,7 +134,8 @@
 
     #container {
       display: flex;
-      height: calc(100vh - 56px);
+      flex: 1;
+      min-height: 0;
     }
 
     #editor-pane {
@@ -83,14 +143,18 @@
       border-right: 2px solid #ddd;
       display: flex;
       flex-direction: column;
+      min-width: 0;
+      min-height: 0;
     }
 
     #viewer-pane {
       width: 50%;
       overflow-y: auto;
-      padding: 20px 40px;
+      padding: 20px 20px;
       background: #fafafa;
       position: relative;
+      min-width: 0;
+      min-height: 0;
     }
 
     .CodeMirror {
@@ -251,6 +315,7 @@
       cursor: col-resize;
       position: relative;
       z-index: 10;
+      flex: 0 0 auto;
     }
 
     #resizer:hover {
@@ -351,6 +416,7 @@
   <header>
     <h1>📝 Markdown + LaTeX Viewer</h1>
     <div class="toolbar">
+      <button id="mini-mode">Mini-mode</button>
       <button id="import">Import</button>
       <button id="export">Export</button>
       <button id="export-pdf">Export PDF</button>
@@ -1207,6 +1273,46 @@ Select any text in the preview pane and render it as LaTeX!`;
       editor.execCommand('find');
     });
 
+    const miniModeBtn = document.getElementById('mini-mode');
+    const resizer = document.getElementById('resizer');
+    const editorPane = document.getElementById('editor-pane');
+    const container = document.getElementById('container');
+
+    let isResizing = false;
+    let verticalSplit = 50;
+    let horizontalSplit = 50;
+
+    function isMiniModeEnabled() {
+      return document.body.classList.contains('mini-mode');
+    }
+
+    function applySplitLayout() {
+      if (isMiniModeEnabled()) {
+        editorPane.style.width = '';
+        viewerPane.style.width = '';
+        editorPane.style.height = `${horizontalSplit}%`;
+        viewerPane.style.height = `${100 - horizontalSplit}%`;
+      } else {
+        editorPane.style.height = '';
+        viewerPane.style.height = '';
+        editorPane.style.width = `${verticalSplit}%`;
+        viewerPane.style.width = `${100 - verticalSplit}%`;
+      }
+
+      editor.refresh();
+    }
+
+    function setMiniMode(enabled) {
+      document.body.classList.toggle('mini-mode', enabled);
+      miniModeBtn.classList.toggle('active', enabled);
+      miniModeBtn.setAttribute('aria-pressed', String(enabled));
+      applySplitLayout();
+    }
+
+    miniModeBtn.addEventListener('click', () => {
+      setMiniMode(!isMiniModeEnabled());
+    });
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -1215,27 +1321,29 @@ Select any text in the preview pane and render it as LaTeX!`;
       }
     });
 
-    // Resizer functionality
-    const resizer = document.getElementById('resizer');
-    const editorPane = document.getElementById('editor-pane');
-    const container = document.getElementById('container');
-
-    let isResizing = false;
-
     resizer.addEventListener('mousedown', (e) => {
       isResizing = true;
-      document.body.style.cursor = 'col-resize';
+      document.body.style.cursor = isMiniModeEnabled() ? 'row-resize' : 'col-resize';
     });
 
     document.addEventListener('mousemove', (e) => {
       if (!isResizing) return;
 
       const containerRect = container.getBoundingClientRect();
-      const newWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100;
+      if (isMiniModeEnabled()) {
+        const newHeight = ((e.clientY - containerRect.top) / containerRect.height) * 100;
 
-      if (newWidth > 20 && newWidth < 80) {
-        editorPane.style.width = `${newWidth}%`;
-        document.getElementById('viewer-pane').style.width = `${100 - newWidth}%`;
+        if (newHeight > 20 && newHeight < 80) {
+          horizontalSplit = newHeight;
+          applySplitLayout();
+        }
+      } else {
+        const newWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100;
+
+        if (newWidth > 20 && newWidth < 80) {
+          verticalSplit = newWidth;
+          applySplitLayout();
+        }
       }
     });
 
@@ -1245,6 +1353,8 @@ Select any text in the preview pane and render it as LaTeX!`;
         document.body.style.cursor = 'default';
       }
     });
+
+    applySplitLayout();
 
     // Initialize
     loadFromLocalStorage();
