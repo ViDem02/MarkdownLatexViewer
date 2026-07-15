@@ -558,7 +558,53 @@
       }
 
       try {
-        await mermaid.run({ nodes: mermaidNodes });
+        for (const node of mermaidNodes) {
+          const encodedDiagram = node.getAttribute('data-diagram');
+          let diagramText = node.textContent || '';
+
+          if (encodedDiagram) {
+            try {
+              diagramText = decodeURIComponent(encodedDiagram);
+            } catch (decodeError) {
+              diagramText = node.textContent || '';
+            }
+          }
+
+          const diagramId = `mermaid-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          let svgCode = null;
+
+          if (typeof mermaid.render === 'function') {
+            try {
+              const rendered = await mermaid.render(diagramId, diagramText);
+              svgCode = typeof rendered === 'string' ? rendered : rendered?.svg || null;
+            } catch (renderError) {
+              svgCode = null;
+            }
+          }
+
+          if (!svgCode && mermaid.mermaidAPI && typeof mermaid.mermaidAPI.render === 'function') {
+            svgCode = await new Promise((resolve, reject) => {
+              try {
+                const rendered = mermaid.mermaidAPI.render(diagramId, diagramText, (svg) => resolve(svg));
+                if (rendered && typeof rendered.then === 'function') {
+                  rendered.then((result) => {
+                    resolve(typeof result === 'string' ? result : result?.svg || '');
+                  }).catch(reject);
+                }
+              } catch (error) {
+                reject(error);
+              }
+            });
+          }
+
+          if (svgCode) {
+            if (/Syntax error in text|mermaid version/i.test(svgCode)) {
+              node.innerHTML = `<pre class="mermaid-fallback">${escapeHtml(diagramText)}</pre>`;
+            } else {
+              node.innerHTML = svgCode;
+            }
+          }
+        }
       } catch (e) {
         console.error('Mermaid rendering error:', e);
         showStatus('⚠ Mermaid rendering error', 3000);
@@ -711,99 +757,19 @@
     </div>
     <main class="page" id="print-content"></main>
     <script>
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: 'strict'
-      });
-
       const html = ${safeContent};
       document.getElementById('print-content').innerHTML = html;
 
       window.addEventListener('load', async () => {
         try {
-          // Wait until mermaid library is available (robust against slow loads)
-          await new Promise((resolve) => {
-            const check = () => {
-              if (window.mermaid && (typeof window.mermaid.run === 'function' || typeof window.mermaid.init === 'function')) {
-                resolve();
-              } else {
-                setTimeout(check, 50);
-              }
-            };
-            check();
-          });
-
-          const mermaidNodes = document.querySelectorAll('.mermaid');
-          if (mermaidNodes.length) {
-            // Prefer programmatic render to get full SVG output per-diagram
-            function escapeHtmlPrint(s) {
-              return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            }
-            for (const node of mermaidNodes) {
-              try {
-                // Prefer the original encoded diagram source if available
-                let diagramText = '';
-                const encoded = node.getAttribute && node.getAttribute('data-diagram');
-                if (encoded) {
-                  try { diagramText = decodeURIComponent(encoded); } catch (e) { diagramText = node.textContent || ''; }
-                } else {
-                  diagramText = node.textContent || '';
-                }
-
-                // Clear node to avoid passing existing SVG/CSS back into the renderer
-                node.innerHTML = '';
-
-                // Try mermaid.render or mermaid.mermaidAPI.render
-                let svgCode = null;
-
-                if (typeof window.mermaid.render === 'function') {
-                  // mermaid.render may be synchronous or return a promise
-                  try {
-                    const res = window.mermaid.render('mermaid-' + Date.now() + Math.floor(Math.random() * 1000), diagramText);
-                    // render can return svg string or an object with svg
-                    svgCode = (typeof res === 'string') ? res : (res && res.svg) ? res.svg : null;
-                  } catch (e) {
-                    // Some versions use a callback form via mermaid.mermaidAPI
-                  }
-                }
-
-                if (!svgCode && window.mermaid.mermaidAPI && typeof window.mermaid.mermaidAPI.render === 'function') {
-                  // Wrap callback-style API in a promise
-                  svgCode = await new Promise((resolve, reject) => {
-                    try {
-                      window.mermaid.mermaidAPI.render('mermaid-' + Date.now() + Math.floor(Math.random() * 1000), diagramText, (svg) => resolve(svg));
-                    } catch (err) {
-                      reject(err);
-                    }
-                  });
-                }
-
-                if (svgCode) {
-                  // Detect mermaid-generated error SVGs and fallback to source
-                  if (/Syntax error in text|mermaid version/i.test(svgCode)) {
-                    node.innerHTML = '<pre class="mermaid-fallback">' + escapeHtmlPrint(diagramText) + '</pre>';
-                  } else {
-                    node.innerHTML = svgCode;
-                  }
-                } else {
-                  // Fallback to run/init for older versions
-                  if (typeof window.mermaid.run === 'function') {
-                    await window.mermaid.run({ nodes: [node] });
-                  } else if (typeof window.mermaid.init === 'function') {
-                    window.mermaid.init(undefined, [node]);
-                  }
-                }
-              } catch (err) {
-                console.error('Per-diagram Mermaid render failed:', err);
-                // attempt best-effort run
-                try {
-                  if (typeof window.mermaid.run === 'function') await window.mermaid.run({ nodes: [node] });
-                } catch (e) { /* ignore */ }
-              }
-            }
+          if (document.fonts && document.fonts.ready) {
+            await document.fonts.ready;
           }
+
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          window.print();
         } catch (error) {
-          console.error('Mermaid print rendering error:', error);
+          console.error('Print preview readiness error:', error);
         }
       });
     <\/script>
@@ -832,15 +798,10 @@
       // Pre-process: protect LaTeX delimiters from markdown parser
       let processedContent = content;
 
-      // Protect mermaid code blocks before any math parsing.
-      const mermaidBlocks = [];
-      let mermaidIndex = 0;
-
+      // Replace Mermaid fences with raw HTML so the markdown parser does not wrap them in <pre><code>.
       processedContent = processedContent.replace(/```mermaid\s*\n([\s\S]*?)```/g, (match, diagram) => {
-        const placeholder = `MERMAIDBLOCK${mermaidIndex}`;
-        mermaidBlocks[mermaidIndex] = { placeholder, diagram: diagram.trim() };
-        mermaidIndex++;
-        return placeholder;
+        const diagramText = diagram.trim();
+        return `\n<div class="mermaid-diagram"><div class="mermaid" data-diagram="${encodeURIComponent(diagramText)}">${escapeHtml(diagramText)}</div></div>\n`;
       });
 
       // Temporarily replace LaTeX blocks to protect them
@@ -904,15 +865,6 @@
             console.error('KaTeX error:', e);
             htmlContent = htmlContent.replace(block.placeholder, block.latex);
           }
-        }
-      });
-
-      // Restore Mermaid blocks after markdown and math rendering.
-      mermaidBlocks.forEach((block) => {
-        if (block) {
-          // Store the raw diagram source in a data attribute (URI-encoded)
-          const mermaidHtml = `<div class="mermaid-diagram"><div class="mermaid" data-diagram="${encodeURIComponent(block.diagram)}">${escapeHtml(block.diagram)}</div></div>`;
-          htmlContent = htmlContent.replace(block.placeholder, mermaidHtml);
         }
       });
 
